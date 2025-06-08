@@ -1,0 +1,1 @@
+export const forbiddenWords = ["badword1", "offensive", "curse"]
