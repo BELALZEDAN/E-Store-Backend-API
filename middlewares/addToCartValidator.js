@@ -1,22 +1,26 @@
 import { body } from "express-validator";
 
-// Validator for adding products to the cart
 export const addToCartValidator = [
-    body("user_id").isMongoId().withMessage("Invalid user ID format"),
+    // Validate products array
     body("products")
+        // Must be an array with at least one element
         .isArray({ min: 1 })
         .withMessage("Products array must contain at least one product")
-        .bail() // Prevents further validation if failed
+        .bail() // Stop validation chain if previous check failed
+        // Custom validation for each product in the array
         .custom((value) => {
-            // Check each product for a valid ID and quantity
+            // Iterate through each product item
             for (let item of value) {
-                if (!item.product || !mongoose.Types.ObjectId.isValid(item.product)) {
+                // Validate product ID exists and is a valid integer
+                if (!item.product || !Number.isInteger(Number(item.product))) {
                     throw new Error("Invalid product ID");
                 }
+
+                // Validate quantity is at least 1
                 if (item.quantity < 1) {
                     throw new Error("Quantity must be at least 1");
                 }
             }
-            return true;
+            return true; // Validation passed
         })
 ];

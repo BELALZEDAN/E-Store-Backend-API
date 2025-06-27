@@ -1,189 +1,221 @@
-import mongoose from "mongoose";
-import Cart from "../models/cart.model.js";
-import Product from "../models/product.model.js";
+import pool from "../config/db.js";
 import { sendResponse } from "../utils/sendResponse.js";
 
 // Create or update the user's cart
 export const addToCart = async (req, res) => {
+  let connection;
   try {
-    const { user_id, products } = req.body;
+    const userId = req.user.id; // Get authenticated user's ID
+    const { products } = req.body; // Array of products to add/update in cart
 
-    // Verify that the user_id from request matches the one in the token
-    if (user_id !== req.user.id) {
-      return sendResponse(res, 403, false, "Access denied. User ID mismatch");
-    }
-
-    // Check if the products array is not empty
+    // Validate input: check if products array exists and is not empty
     if (!products || products.length === 0) {
-      return sendResponse(res, 400, false, "Products array is empty");
+      return sendResponse(res, 400, false, "Your cart is empty. Add products before submitting");
     }
 
-    // Check if each product has a valid product ID and quantity
-    for (let item of products) {
-      if (!item.product || item.quantity < 1) {
-        return sendResponse(res, 400, false, "Invalid product or quantity");
-      }
+    // Merge duplicate products by summing their quantities to avoid duplicates in DB
+    const combinedProducts = products.reduce((acc, item) => {
+      const found = acc.find(p => p.product === item.product);
+      if (found) found.quantity += item.quantity;
+      else acc.push({ product: item.product, quantity: item.quantity });
+      return acc;
+    }, []);
 
-      // Check if the product exists in the database
-      const product = await Product.findById(item.product);
-      if (!product) {
-        return sendResponse(
-          res,
-          404,
-          false,
-          `Product with id ${item.product} not found`
-        );
+    connection = await pool.getConnection();
+    await connection.beginTransaction(); // Start DB transaction for atomicity
+
+    // Verify each product exists and quantity is valid (>0)
+    const productChecks = await Promise.all(
+      combinedProducts.map(item => connection.query("SELECT id FROM products WHERE id = ?", [item.product]))
+    );
+    for (let i = 0; i < combinedProducts.length; i++) {
+      if (combinedProducts[i].quantity < 1 || productChecks[i][0].length === 0) {
+        // If invalid, rollback transaction and return error
+        await connection.rollback();
+        return sendResponse(res, 400, false, `Invalid product or quantity for product ID ${combinedProducts[i].product}`);
       }
     }
 
-    // Check if the user already has a cart
-    let cart = await Cart.findOne({ user_id });
-
-    if (!cart) {
-      // If no cart exists, create a new one
-      cart = new Cart({
-        user_id,
-        products: products, // Add all products to the cart
-      });
+    // Check if user already has a cart
+    let [cart] = await connection.query("SELECT id FROM carts WHERE user_id = ?", [userId]);
+    let cartId;
+    if (cart.length === 0) {
+      // No cart exists: create a new cart for the user
+      const [result] = await connection.query("INSERT INTO carts (user_id) VALUES (?)", [userId]);
+      cartId = result.insertId; // Get the new cart's ID
     } else {
-      // If cart exists, update it with the new products
-      for (let item of products) {
-        const existingProductIndex = cart.products.findIndex(
-          (productItem) => productItem.product.toString() === item.product
-        );
-
-        if (existingProductIndex !== -1) {
-          // If the product is already in the cart, update the quantity
-          cart.products[existingProductIndex].quantity += item.quantity;
-        } else {
-          // If the product is not in the cart, add it
-          cart.products.push(item);
-        }
-      }
+      cartId = cart[0].id; // Existing cart's ID
     }
 
-    // Save the cart after modifications
-    await cart.save();
+    // Get existing items in the cart
+    const [existingItems] = await connection.query(
+      "SELECT id, product_id, quantity FROM cart_items WHERE cart_id = ?",
+      [cartId]
+    );
 
-    // Return the updated cart
-    sendResponse(res, 200, true, "Cart updated", cart);
+    // Create a map for quick lookup of existing products in cart
+    const existingMap = new Map();
+    existingItems.forEach(item => existingMap.set(item.product_id, item));
+
+    // Prepare DB queries: update quantity if product exists, else insert new product
+    const queries = combinedProducts.map(item => {
+      if (existingMap.has(item.product)) {
+        const existingItem = existingMap.get(item.product);
+        const newQuantity = existingItem.quantity + item.quantity; // Add new quantity to existing
+        return connection.query("UPDATE cart_items SET quantity = ? WHERE id = ?", [newQuantity, existingItem.id]);
+      } else {
+        // Insert new product with its quantity to cart_items
+        return connection.query("INSERT INTO cart_items (cart_id, product_id, quantity) VALUES (?, ?, ?)", [cartId, item.product, item.quantity]);
+      }
+    });
+
+    await Promise.all(queries); // Execute all queries in parallel
+    await connection.commit(); // Commit transaction to save changes
+
+    // Fetch updated cart with product details to send back to client
+    const [updatedCart] = await connection.query(
+      `SELECT ci.id, ci.product_id, ci.quantity, p.product_name, p.price, p.discount 
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.cart_id = ?`,
+      [cartId]
+    );
+
+    // Return success response with updated cart products
+    return sendResponse(res, 200, true, "Cart updated", { products: updatedCart });
+
   } catch (err) {
-    // res.status(500).json({ message: "Server error", error: err.message });
-    sendResponse(res, 500, false, "Internal server error", null, err.message);
+    // Rollback DB transaction on any error
+    if (connection) await connection.rollback();
+    // Return internal server error with error message
+    return sendResponse(res, 500, false, "Internal server error", null, err.message);
+  } finally {
+    // Release DB connection no matter what
+    if (connection) connection.release();
   }
 };
 
-// Remove product from the cart
+// Remove a specific product from the user's cart
 export const removeFromCart = async (req, res) => {
+  let connection;
   try {
-    const { user_id, product_id } = req.params;
+    const userId = req.user.id;
+    const { product_id } = req.params;
 
-    // Verify that the user_id from request matches the one in the token
-    if (user_id !== req.user.id) {
-      return sendResponse(res, 403, false, "Access denied. User ID mismatch");
-    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    // Validate both user_id and product_id
-    if (
-      !mongoose.Types.ObjectId.isValid(user_id) ||
-      !mongoose.Types.ObjectId.isValid(product_id)
-    ) {
-      return sendResponse(res, 400, false, "Invalid product or user ID");
-    }
-
-    // Find the cart associated with the user
-    const cart = await Cart.findOne({ user_id });
-
-    if (!cart) {
+    // Get user's cart
+    const [cartRows] = await connection.query("SELECT id FROM carts WHERE user_id = ?", [userId]);
+    if (cartRows.length === 0) {
       return sendResponse(res, 404, false, "Cart not found");
     }
 
-    // Find the index of the product in the cart
-    const productIndex = cart.products.findIndex(
-      (item) => item.product.toString() === product_id
+    const cartId = cartRows[0].id;
+
+    // Check if the product exists in the cart
+    const [cartItem] = await connection.query(
+      "SELECT id FROM cart_items WHERE cart_id = ? AND product_id = ?",
+      [cartId, product_id]
     );
 
-    if (productIndex === -1) {
+    if (cartItem.length === 0) {
       return sendResponse(res, 404, false, "Product not found in your cart");
     }
 
-    // Remove the product from the cart
-    cart.products.splice(productIndex, 1);
+    // Remove product
+    await connection.query("DELETE FROM cart_items WHERE cart_id = ? AND product_id = ?", [cartId, product_id]);
 
-    if (cart.products.length === 0) {
-      // Delete the cart if it's now empty
-      await cart.deleteOne();
-      return sendResponse(
-        res,
-        200,
-        true,
-        "Product removed and cart deleted because it became empty"
-      );
-    }
+    // Fetch updated cart
+    const [updatedCart] = await connection.query(
+      `SELECT ci.id, ci.product_id, ci.quantity, p.product_name, p.price, p.discount
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.cart_id = ?`,
+      [cartId]
+    );
 
-    // Save the updated cart
-    await cart.save();
-
-    sendResponse(res, 200, true, "Product removed from cart", cart);
+    await connection.commit();
+    return sendResponse(res, 200, true, "Product removed from cart", { products: updatedCart });
   } catch (err) {
-    console.error("Server error:", err);
-    sendResponse(res, 500, false, "Internal server error", null, err.message);
+    if (connection) await connection.rollback();
+    return sendResponse(res, 500, false, "Internal server error", null, err.message);
+  } finally {
+    if (connection) connection.release();
   }
 };
-
 // Get the user's cart
 export const getCart = async (req, res) => {
+  let connection;
   try {
-    const { user_id } = req.params;
+    const userId = req.user.id; // Get user ID from the token directly
 
-    // Verify that the user_id from request matches the one in the token
-    if (user_id !== req.user.id) {
-      return sendResponse(res, 403, false, "Access denied. User ID mismatch");
-    }
+    connection = await pool.getConnection();
 
-    // Validate user_id
-    if (!mongoose.Types.ObjectId.isValid(user_id)) {
-      return sendResponse(res, 400, false, "Invalid user ID");
-    }
+    // Find the cart for this user
+    const [cart] = await connection.query(
+      "SELECT id FROM carts WHERE user_id = ?",
+      [userId]
+    );
 
-    // Find the cart by user_id
-    const cart = await Cart.findOne({ user_id }).populate("products.product");
-
-    if (!cart) {
+    if (cart.length === 0) {
       return sendResponse(res, 404, false, "Cart not found");
     }
 
-    sendResponse(res, 200, true, "Cart fetched successfully", cart);
+    const cartId = cart[0].id;
+
+    // Get cart items joined with product details
+    const [cartItems] = await connection.query(
+      `SELECT ci.id, ci.product_id, ci.quantity, p.product_name, p.price, p.discount, 
+              p.description, p.stock, p.category_id
+       FROM cart_items ci
+       JOIN products p ON ci.product_id = p.id
+       WHERE ci.cart_id = ?`,
+      [cartId]
+    );
+
+    // Send back the cart products
+    return sendResponse(res, 200, true, "Cart fetched successfully", { products: cartItems });
+
   } catch (err) {
-    sendResponse(res, 500, false, "Internal server error", null, err.message);
+    return sendResponse(res, 500, false, "Internal server error", null, err.message);
+  } finally {
+    if (connection) connection.release();
   }
 };
 
 // Clear the cart (remove all products)
 export const clearCart = async (req, res) => {
+  let connection;
   try {
-    const { user_id } = req.params;
+    const userId = req.user.id; // Get user ID from token
 
-    // Verify that the user_id from request matches the one in the token
-    if (user_id !== req.user.id) {
-      return sendResponse(res, 403, false, "Access denied. User ID mismatch");
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    // Find the cart for the user
+    const [cart] = await connection.query(
+      "SELECT id FROM carts WHERE user_id = ?",
+      [userId]
+    );
+
+    if (cart.length === 0) {
+      // If no cart, just return success (idempotent behavior)
+      await connection.commit();
+      return sendResponse(res, 200, true, "Cart is already empty");
     }
 
-    // Validate user_id
-    if (!mongoose.Types.ObjectId.isValid(user_id)) {
-      return sendResponse(res, 400, false, "Invalid user ID");
-    }
+    const cartId = cart[0].id;
 
-    // Find and delete the user's cart
-    const cart = await Cart.findOneAndDelete({ user_id });
+    // Delete all cart items but keep the cart record itself
+    await connection.query("DELETE FROM cart_items WHERE cart_id = ?", [cartId]);
 
-    if (!cart) {
-      return sendResponse(res, 404, false, "Cart not found");
-    }
-
-    // Return success message
-    sendResponse(res, 200, true, "Cart cleared");
+    await connection.commit();
+    return sendResponse(res, 200, true, "Cart cleared successfully");
   } catch (err) {
-    sendResponse(res, 500, false, "Internal server error", null, err.message);
+    if (connection) await connection.rollback();
+    return sendResponse(res, 500, false, "Internal server error", null, err.message);
+  } finally {
+    if (connection) connection.release();
   }
 };

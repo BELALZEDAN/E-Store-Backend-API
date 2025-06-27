@@ -1,12 +1,12 @@
 import { sendResponse } from "../utils/sendResponse.js";
 
-// Helper function to check ownership or admin role
-export const checkOwnershipOrAdmin = (document, user, modelName = "Resource") => {
-    if (document.user_id.toString() !== user._id.toString() && user.role !== 'admin') {
+export const checkOwnershipOrAdmin = (record, user, modelName = "Resource") => {
+    // Check if user is not owner AND not admin
+    if (record.user_id !== user.id && user.role !== 'admin') {
         return {
             status: 403,
             message: `You are not authorized to access this ${modelName}`
         };
     }
-    return null;  // No error, proceed
+    return null; // Authorization granted
 };

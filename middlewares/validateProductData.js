@@ -22,10 +22,10 @@ export const validateProductData = [
     .isInt({ min: 0 })
     .withMessage("Stock must be a positive integer."),
 
-  body("category")
+  body("category_id")
     .notEmpty()
     .withMessage("Product category is required.")
-    .isMongoId()
+    .isInt({ gt: 0 })
     .withMessage("Category is required and must be a valid ObjectId."),
 
   body("images_url")

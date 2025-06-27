@@ -27,7 +27,7 @@ router.get("/", getAllOrders);
 // Route to get a single order by ID
 router.get("/:order_id", getOrderById);
 
-// Route to update the status of an order
+// Route to update an order
 router.put("/:order_id",
     verifyToken,
     updateOrderValidator,
