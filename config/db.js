@@ -12,7 +12,7 @@ const pool = mysql.createPool({
   host: process.env.MYSQL_HOST || 'localhost', // Database server host (default: localhost)
   user: process.env.MYSQL_USER || 'root',      // Database username (default: root)
   password: process.env.MYSQL_PASSWORD || '',  // Database password (default: empty)
-  database: process.env.MYSQL_DATABASE || 'e-storedb', // Database name
+  database: process.env.MYSQL_DATABASE || 'e_store_db', // Database name
   waitForConnections: true,    // Wait for connection when pool is full
   connectionLimit: 10,         // Maximum number of simultaneous connections
   queueLimit: 0,               // Unlimited queued connection requests
