@@ -11,22 +11,22 @@ import { handleValidation } from "../middlewares/handleValidation.js";
 
 const router = express.Router();
 
-// Route to add or update products in the cart
-router.post("/",
+// GET /api/cart → Get current user's cart
+router.get("/", verifyToken, getCart);
+
+// POST /api/cart → Add/update products in the cart
+router.post(
+  "/",
   verifyToken,
   addToCartValidator,
   handleValidation,
-  addToCart);
+  addToCart
+);
 
-// Route to remove a specific product from the cart
-router.delete("/:user_id/:product_id",
-  verifyToken,
-  removeFromCart);
+// DELETE /api/cart → Clear the entire cart
+router.delete("/", verifyToken, clearCart);
 
-// Route to get the cart of a specific user
-router.get("/:user_id", verifyToken, getCart);
-
-// Route to clear all products from the user's cart
-router.delete("/:user_id", verifyToken, clearCart);
+// DELETE /api/cart/product/:product_id → Remove a specific product from cart
+router.delete("/product/:product_id", verifyToken, removeFromCart);
 
 export default router;

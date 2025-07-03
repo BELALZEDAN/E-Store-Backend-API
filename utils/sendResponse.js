@@ -8,9 +8,9 @@ export const sendResponse = (
   error = null
 ) => {
   const response = {
+    status: statusCode,
     success,
     message,
-    status: statusCode,
   };
   if (data) response.data = data;
   if (error) response.error = error;

@@ -5,6 +5,8 @@ import {
   getProductById,
   updateProduct,
   deleteProduct,
+  getProductsBySeller,
+  deleteAllProducts,
 } from "../controllers/product.controller.js";
 import { validateProductData } from "../middlewares/validateProductData.js";
 import { uploadImages } from "../middlewares/uploadImages.js";
@@ -37,7 +39,13 @@ router.put(
   updateProduct
 );
 
+// DELETE all products - only for development environment
+router.delete("/delete-all", verifyToken, deleteAllProducts) // This route is available only in development mode
+
 // Route to delete a product by ID (protected by verifyToken middleware)
 router.delete("/:id", verifyToken, deleteProduct);
+
+// Route to get all products of a specific seller
+router.get("/seller/:sellerId/products", getProductsBySeller);
 
 export default router;

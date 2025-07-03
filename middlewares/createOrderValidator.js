@@ -1,47 +1,55 @@
-import { body } from "express-validator";
+import { body } from 'express-validator';
 
-// Allowed statuses for orders
-const VALID_STATUSES = [
-    "pending", "processing", "shipped", "out_for_delivery",
-    "delivered", "cancelled", "refunded", "failed",
-    "on_hold", "returned"
-];
-
-// Validation rules for creating an order
 export const createOrderValidator = [
-    body("user_id")
-        .notEmpty().withMessage("User ID is required")
-        .isMongoId().withMessage("Invalid User ID format"),
+  // Validate shipping_info object and its required fields
+  body('shipping_info').isObject().withMessage('Shipping info must be an object'),
+  body('shipping_info.address')
+    .notEmpty()
+    .withMessage('Shipping address is required'),
+  body('shipping_info.city')
+    .notEmpty()
+    .withMessage('Shipping city is required'),
+  body('shipping_info.postal_code')
+    .notEmpty()
+    .withMessage('Shipping postal code is required'),
+  body('shipping_info.country')
+    .notEmpty()
+    .withMessage('Shipping country is required'),
 
-    body("shipping_info")
-        .notEmpty().withMessage("Shipping info is required")
-        .isString().withMessage("Shipping info must be a string")
-        .isLength({ min: 10 }).withMessage("Shipping info should have at least 10 characters")
-        .matches(/^[A-Za-z0-9\s,.-]+$/).withMessage("Shipping info contains invalid characters")
-        .trim(),
+  // Validate payment_info object and its required fields
+  body('payment_info').isObject().withMessage('Payment info must be an object'),
+  body('payment_info.method')
+    .notEmpty()
+    .withMessage('Payment method is required'),
 
-    body("payment_info")
-        .optional()
-        .isString().withMessage("Payment info must be a string")
-        .isLength({ min: 10 }).withMessage("Payment info should have at least 10 characters")
-        .matches(/^[A-Za-z0-9\s,.-]+$/).withMessage("Payment info contains invalid characters")
-        .trim(),
+  // Validate products is a non-empty array
+  body('products')
+    .isArray({ min: 1 })
+    .withMessage('Products must be a non-empty array'),
 
-    body("products")
-        .isArray({ min: 1 }).withMessage("Products must be a non-empty array"),
+  // Validate each product item inside products array
+  body('products.*.product_id')
+    .isInt({ min: 1 })
+    .withMessage('Product ID must be a positive integer'),
 
-    body("products.*.product") // The "*" applies the validation to each product in the "products" array.
-        .notEmpty().withMessage("Product ID is required")
-        .isMongoId().withMessage("Invalid Product ID format"),
+  body('products.*.quantity')
+    .isInt({ min: 1 })
+    .withMessage('Quantity must be at least 1'),
 
-    body("products.*.quantity")
-        .isInt({ min: 1 }).withMessage("Product quantity must be at least 1"),
-
-    body("total_price")
-        .notEmpty().withMessage("Total price is required")
-        .isFloat({ min: 0 }).withMessage("Total price must be a non-negative number"),
-
-    body("status")
-        .optional()
-        .isIn(VALID_STATUSES).withMessage("Invalid status value"),
+  // Validate optional status field and allowed enum values
+  body('status')
+    .optional()
+    .isIn([
+      'pending',
+      'processing',
+      'shipped',
+      'out_for_delivery',
+      'delivered',
+      'cancelled',
+      'refunded',
+      'failed',
+      'on_hold',
+      'returned',
+    ])
+    .withMessage('Invalid status value'),
 ];

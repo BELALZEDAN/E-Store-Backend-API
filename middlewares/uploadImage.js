@@ -2,63 +2,77 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 
-const uploadDir = "uploads";
-const tempDir = `${uploadDir}/temp`;
+const uploadRoot = "uploads";
+const tempDir = path.join(uploadRoot, "temp");
 
-// Create main and temp folders if they don't exist
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-
-// Configure multer storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    // If user is logged in, use their folder; otherwise use temp
-    const userId = req.user?.id;
-    // Store images in uploads/user/photo_path
-    const targetDir = userId ? `${uploadDir}/user/photo_path` : tempDir;
-
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-    cb(null, targetDir);
-  },
-  filename: function (req, file, cb) {
-    // Generate a unique filename
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + "-" + uniqueSuffix + ext);
-  },
+// Ensure base and temp directories exist
+[uploadRoot, tempDir].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// Accept only image files
+// Multer storage configuration (saves to temp/)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, tempDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname);
+    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
+  }
+});
+
+// File type filter with custom error
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp|bmp|svg|tiff/;
-  const ext = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mime = allowedTypes.test(file.mimetype);
-  if (ext && mime) cb(null, true);
-  else cb(new Error("Only images are allowed"), false);
+  const allowedTypes = /jpe?g|png|gif|webp|bmp|svg|tiff/i;
+  const extValid = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimeValid = allowedTypes.test(file.mimetype.toLowerCase());
+
+  if (extValid && mimeValid) {
+    cb(null, true);
+  } else {
+    cb(new Error("Unsupported file type"));
+  }
 };
 
-// Multer config
+// Export multer upload middleware
 export const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
 });
 
-// Move image from temp folder to user folder
-export const moveImageToUserFolder = (file, userId) => {
-  if (!file || !userId) return null;
+/**
+ * Moves uploaded image to a permanent folder based on type (user, product...)
+ * @param {Object} file - Multer file object
+ * @param {String} type - Folder type: 'users', 'products', etc.
+ * @param {Number|String} id - The unique ID (userId, productId)
+ * @returns {String|null} - Relative path to be saved in DB
+ */
+export const moveImageToFolder = (file, type, id) => {
+  if (!file || !type || !id) return null;
 
-  const userDir = path.join(uploadDir, `user/photo_path`); // Store in the new path
-  const oldPath = file.path; // current location (temp)
-  const newPath = path.join(userDir, file.filename); // new destination
+  try {
+    const entityDir = path.join(uploadRoot, type, `${type.slice(0, -1)}_${id}`);
+    if (!fs.existsSync(entityDir)) fs.mkdirSync(entityDir, { recursive: true });
 
-  // Create user folder if not exists
-  if (!fs.existsSync(userDir)) {
-    fs.mkdirSync(userDir, { recursive: true });
+    const oldPath = file.path;
+    const newFilename = file.filename;
+    const newPath = path.join(entityDir, newFilename);
+
+    // Check if uploaded file actually exists
+    if (!fs.existsSync(oldPath)) {
+      console.error("Uploaded file does not exist:", oldPath);
+      return null;
+    }
+
+    // Move the file to its final destination
+    fs.renameSync(oldPath, newPath);
+
+    // Return the relative URL path for frontend
+    return `/${path.posix.join("uploads", type, `${type.slice(0, -1)}_${id}`, newFilename)}`;
+  } catch (err) {
+    console.error("Error moving image file:", err);
+    return null;
   }
-
-  // Move file from temp to user folder
-  fs.renameSync(oldPath, newPath);
-
-  return newPath; // Return new file path
 };

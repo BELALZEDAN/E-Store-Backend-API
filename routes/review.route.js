@@ -7,16 +7,16 @@ import {
     toggleLikeReview,
 } from "../controllers/review.controller.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
-import { addToCartValidator } from "../middlewares/addToCartValidator.js";
+import { addReviewValidator } from "../middlewares/addReviewValidator.js";
 import { handleValidation } from "../middlewares/handleValidation.js";
-import { updateReviewValidator } from "../middlewares/addReviewValidator.js";
+import { updateReviewValidator } from "../middlewares/updateReviewValidator.js";
 
 const router = express.Router();
 
 // Add a new review (authenticated user required)
 router.post("/",
     verifyToken,
-    addToCartValidator,
+    addReviewValidator,
     handleValidation,
     addReview);
 

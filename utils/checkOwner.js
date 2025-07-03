@@ -1,13 +1,12 @@
 import { sendResponse } from "../utils/sendResponse.js";
 
-// Helper function to check ownership
-export const checkOwner = (document, user, modelName = "Resource") => {
+export const checkOwner = (resource, user, modelName = "Resource") => {
     // Check if the current user is the owner
-    if (document.user_id.toString() !== user._id.toString()) {
+    if (resource.user_id !== user.id) {
         return {
             status: 403,
             message: `You are not authorized to access this ${modelName}`
         };
     }
-    return null;  // No error, proceed
+    return null; // No error, authorized
 };

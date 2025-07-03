@@ -1,30 +1,34 @@
-import User from "../models/user.model.js";
-import { v4 as uuidv4 } from "uuid"; // Use UUID for generating truly unique identifiers
+import { v4 as uuidv4 } from "uuid";
+import pool from "../config/db.js"
 
-// Function to generate a base username based on first and last name
 export function generateBaseUsername(firstName, lastName) {
-    const cleanedFirstName = firstName.trim().toLowerCase().replace(/\s+/g, "_"); // Clean and format the first name
-    const cleanedLastName = lastName.trim().toLowerCase().replace(/\s+/g, "_"); // Clean and format the last name
-    return `${cleanedFirstName}_${cleanedLastName}`; // Combine first and last name for base username
+    const cleanedFirstName = firstName.trim().toLowerCase().replace(/\s+/g, "_");
+    const cleanedLastName = lastName.trim().toLowerCase().replace(/\s+/g, "_");
+    return `${cleanedFirstName}_${cleanedLastName}`;
 }
 
-// Function to generate a unique username based on the base name
 export async function generateUniqueUsername(firstName, lastName) {
-    const baseName = generateBaseUsername(firstName, lastName); // Generate base name
+    const baseName = generateBaseUsername(firstName, lastName);
+    let connection;
 
-    // Check if the base name already exists
-    let existingUser = await User.findOne({ username: baseName });
+    try {
+        connection = await pool.getConnection();
 
-    if (!existingUser) {
-        const randomNumber = Math.floor(Math.random() * 1000000)
-            .toString()
-            .padStart(6, "0"); // 6-digit random number
-        const candidate = `${baseName}${randomNumber}`;
+        // Check if username exists in SQL
+        const [existingUser] = await connection.query(
+            'SELECT id FROM users WHERE username = ?',
+            [baseName]
+        );
 
-        return candidate; // If base name is unique, return it
+        if (existingUser.length === 0) {
+            const randomNumber = Math.floor(Math.random() * 1000000)
+                .toString()
+                .padStart(6, "0");
+            return `${baseName}${randomNumber}`;
+        }
+
+        return `${baseName}_${uuidv4()}`;
+    } finally {
+        if (connection) connection.release();
     }
-
-    // If the base name exists, append UUID
-    const candidate = `${baseName}_${uuidv4()}`;
-    return candidate; // Return the generated username with UUID
 }

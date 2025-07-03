@@ -5,6 +5,7 @@ import {
     getCategoryById,
     updateCategory,
     deleteCategory,
+    deleteAllCategories,
 } from "../controllers/category.controller.js";
 import { verifyToken } from "../middlewares/verifyToken.js";
 import { createCategoryValidator } from "../middlewares/createCategoryValidator.js";
@@ -33,6 +34,9 @@ router.put("/:category_id",
     updateCategoryValidator,
     handleValidation,
     updateCategory);
+
+// DELETE all categories - only for development environment
+router.delete("/delete-all", verifyToken, deleteAllCategories); // This route is available only in development mode
 
 // Delete category by ID
 router.delete("/:category_id", verifyToken, deleteCategory);
